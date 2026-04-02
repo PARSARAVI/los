@@ -1,0 +1,114 @@
+server:
+  port: 2886
+
+jwt:
+  secret: NarveeLoanOriginationSecureJwtSecretKey2026
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+    disable-swagger-default-url: true
+    use-root-path: true
+    urls:
+      - name: platform-service
+        url: /platform/v3/api-docs
+  packages-to-scan: com.narvee.NONEXISTENT
+
+spring:
+  application:
+    name: api-gateway
+
+  main:
+    web-application-type: reactive
+
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+        add-to-simple-url-handler-mapping: true
+
+      routes:
+        # ── Docs routes (no auth) ──
+        - id: platform-docs
+          uri: lb://platform-service
+          predicates:
+            - Path=/platform/v3/api-docs, /platform/v3/api-docs/**
+          filters:
+            - RewritePath=/platform/(?<segment>.*), /${segment}
+
+        # ── Platform PUBLIC (no auth) ──
+        - id: platform-public
+          uri: lb://platform-service
+          predicates:
+            - Path=/platform/po/register,
+                   /platform/po/send-otp,
+                   /platform/po/verify-otp,
+                   /platform/tenant/register,
+                   /platform/tenant/send-otp,
+                   /platform/tenant/verify-otp,
+                   /platform/partner/register,
+                   /platform/partner/verify-otp
+          filters: []
+
+        # ── Platform PROTECTED ──
+        - id: platform-protected
+          uri: lb://platform-service
+          predicates:
+            - Path=/platform/**
+          filters:
+            - AuthenticationFilter
+
+        # ── Origination PUBLIC ──
+        - id: origination-public
+          uri: lb://origination-service
+          predicates:
+            - Path=/origination/public/**
+          filters: []
+
+        # ── Origination PROTECTED ──
+        - id: origination-protected
+          uri: lb://origination-service
+          predicates:
+            - Path=/origination/**
+          filters:
+            - AuthenticationFilter
+            - name: CircuitBreaker
+              args:
+                name: originationService
+                fallbackUri: forward:/fallback/serviceDown
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 5s
+        permittedNumberOfCallsInHalfOpenState: 3
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: 30s
